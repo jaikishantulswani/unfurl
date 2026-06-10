@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 
 	parser "github.com/Cgboal/DomainParser"
@@ -55,6 +54,9 @@ func main() {
 		return
 	}
 
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+
 	sc := bufio.NewScanner(os.Stdin)
 	buf := make([]byte, 0, 64*1024)
 	sc.Buffer(buf, 1024*1024)
@@ -81,11 +83,12 @@ func main() {
 				continue
 			}
 
-			if seen[val] && unique {
+			if unique && seen[val] {
 				continue
 			}
 
-			fmt.Println(val)
+			out.WriteString(val)
+			out.WriteByte('\n')
 
 			// no point using up memory if we're outputting dupes
 			if unique {
@@ -104,6 +107,11 @@ func main() {
 // has no scheme, http:// is prepended and the string is
 // re-parsed
 func parseURL(raw string) (*url.URL, error) {
+	// Fast path: if there is no colon, there is no scheme.
+	if strings.Index(raw, ":") == -1 {
+		return url.Parse("http://" + raw)
+	}
+
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, err
@@ -267,21 +275,21 @@ func keyPairs(u *url.URL, _ string) []string {
 // for http://sub.example.com/path it will return
 // []string{"sub.example.com"}
 func domains(u *url.URL, f string) []string {
-	return format(u, "%d")
+	return []string{u.Hostname()}
 }
 
 // apexes return the apex portion of the URL. e.g.
 // for http://sub.example.com/path it will return
 // []string{"example.com"}
 func apexes(u *url.URL, f string) []string {
-	return format(u, "%r.%t")
+	return []string{fmt.Sprintf("%s.%s", extractFromDomain(u, "root"), extractFromDomain(u, "tld"))}
 }
 
 // paths returns the path portion of the URL. e.g.
 // for http://sub.example.com/path it will return
 // []string{"/path"}
 func paths(u *url.URL, f string) []string {
-	return format(u, "%p")
+	return []string{u.EscapedPath()}
 }
 
 // format is a little bit like a special sprintf for
@@ -411,10 +419,7 @@ func format(u *url.URL, f string) []string {
 
 func extractFromDomain(u *url.URL, selection string) string {
 
-	// remove the port before parsing
-	portRe := regexp.MustCompile(`(?m):\d+$`)
-
-	domain := portRe.ReplaceAllString(u.Host, "")
+	domain := u.Hostname()
 
 	switch selection {
 	case "subdomain":
